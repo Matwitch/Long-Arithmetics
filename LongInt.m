@@ -1,26 +1,26 @@
-classdef LongUInt
+classdef LongInt
     
     properties
         n_words(1, 1) uint64
         num(1, :) uint64
+        sign(1, 1) logical
     end
     
     methods
-        function obj = LongUInt(init_num, bits_num)
+        function obj = LongInt(init_num)
             arguments
                 init_num(1, 1) {mustBeArithmetic(init_num)} = 0
-                bits_num(1, 1) {mustBeInteger, mustBeInRange(bits_num, 1, 4096)} = architecture_word_length
             end
             
-            if isa(init_num, 'LongUInt')
+            if isa(init_num, 'LongInt')
                 obj = init_num;
             elseif isa(init_num, 'double')
                 obj = obj.parse_double(init_num);
-            elseif isinteger(init_num)
-                obj.num = zeros(1, bits_to_uints(bits_num) , architecture_uint_type);
+            elseif isinteger(init_num) && init_num >= 0
+                obj.num = zeros(1, 1, architecture_uint_type);
                 obj.num(1) = cast(init_num, architecture_uint_type);
             else
-                throw(MExeption('Cannot construct LongUInt from: ' + class(init_num)));
+                throw(MExeption('Cannot construct LongInt from: ' + class(init_num)));
             end
             
         end
@@ -28,7 +28,7 @@ classdef LongUInt
 
         function result = bitshift(obj, k)
             arguments
-                obj(1, 1) LongUInt
+                obj(1, 1) LongInt
                 k(1, 1) {mustBeInteger(k)}
             end
 
@@ -60,15 +60,15 @@ classdef LongUInt
 
         function [result, carry] = plus(obj, obj2)
             arguments
-                obj(1, 1) LongUInt
+                obj(1, 1) LongInt
                 obj2(1, 1) {mustBeArithmetic(obj2)}
             end
             
-            if ~isa(obj2, 'LongUInt')
-                [result, carry] = plus(obj, LongUInt(obj2, obj.n_words * architecture_word_length));
+            if ~isa(obj2, 'LongInt')
+                [result, carry] = plus(obj, LongInt(obj2, obj.n_words * architecture_word_length));
                 return;
             elseif obj2.n_words == obj.n_words
-                result = LongUInt(0, obj.n_words * architecture_word_length);
+                result = LongInt(0, obj.n_words * architecture_word_length);
     
                 carry_bit = 0;
 
@@ -87,57 +87,57 @@ classdef LongUInt
 
         function [result, carry] = minus(obj, obj2)
             arguments
-                obj(1, 1) LongUInt
+                obj(1, 1) LongInt
                 obj2(1, 1) {mustBeArithmetic(obj2)}
             end
 
-            result = LongUInt(obj.num(1) - obj2.num(1));
+            result = LongInt(obj.num(1) - obj2.num(1));
             carry = false;
         end
 
         function [result, carry] = mtimes(obj, obj2)
             arguments
-                obj(1, 1) LongUInt
+                obj(1, 1) LongInt
                 obj2(1, 1) {mustBeArithmetic(obj2)}
             end
 
-            result = LongUInt(obj.num(1) * obj2.num(1));
+            result = LongInt(obj.num(1) * obj2.num(1));
             carry = false;
         end
 
         function [result, carry] = mrdivide(obj, obj2)
             arguments
-                obj(1, 1) LongUInt
+                obj(1, 1) LongInt
                 obj2(1, 1) {mustBeArithmetic(obj2)}
             end
 
-            result = LongUInt(obj.num(1) / obj2.num(1));
+            result = LongInt(obj.num(1) / obj2.num(1));
             carry = false;
         end
 
         function [result, carry] = mpower(obj, obj2)
             arguments
-                obj(1, 1) LongUInt
+                obj(1, 1) LongInt
                 obj2(1, 1) {mustBeArithmetic(obj2)}
             end
 
-            result = LongUInt(obj.num(1) / obj2.num(1));
+            result = LongInt(obj.num(1) / obj2.num(1));
             carry = false;
         end
 
         function result = lt(obj, obj2)
             arguments
-                obj(1, 1) LongUInt
+                obj(1, 1) LongInt
                 obj2(1, 1) {mustBeArithmetic(obj2)}
             end
 
-            result = LongUInt(obj.num(1) / obj2.num(1));
+            result = LongInt(obj.num(1) / obj2.num(1));
             
         end
 
         function result = eq(obj, obj2)
             arguments
-                obj(1, 1) LongUInt
+                obj(1, 1) LongInt
                 obj2(1, 1) {mustBeArithmetic(obj2)}
             end
 
@@ -148,7 +148,7 @@ classdef LongUInt
     methods(Access = private)
         function obj = parse_double(obj, num)
             arguments
-                obj(1, 1) LongUInt
+                obj(1, 1) LongInt
                 num(1, 1) double
             end
 
@@ -158,7 +158,8 @@ classdef LongUInt
 
             frac = bitand(bitshift(intmax(architecture_uint_type), -12), typecast(num, architecture_uint_type)) + bitshift(1, 52);
             exp = bitshift(bitand(bitshift(bitshift(intmax(architecture_uint_type), 11 - 64), 64 - 12), typecast(num, architecture_uint_type)), -52) - 1023;
-            obj.num = zeros(1, bits_to_uints(2^ceil(log2(architecture_word_length + double(exp)))), architecture_uint_type);
+            obj.n_words = bits_to_uints(architecture_word_length + double(exp));
+            obj.num = zeros(1, obj.n_words, architecture_uint_type);
             obj.num(1) = typecast(frac, architecture_uint_type);
             obj = bitshift(obj, -52 + int64(exp));
         end
@@ -166,9 +167,9 @@ classdef LongUInt
 end
 
 function mustBeArithmetic(a)  
-    if ~(isscalar(a) && ((isnumeric(a) && a >= 0) || isa(a,'LongUInt')))
-        eidType = 'Num:notUIntOrLongUInt';
-        msgType = 'Values assigned to Num property must be unsigned integer or LongUInt type.';
+    if ~(isscalar(a) && (isnumeric(a) || isa(a,'LongInt')))
+        eidType = 'Num:notIntOrLongInt';
+        msgType = 'Values assigned to Num property must be an integer or a LongInt.';
         throwAsCaller(MException(eidType,msgType))
     end
 end
