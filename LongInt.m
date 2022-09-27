@@ -3,7 +3,7 @@ classdef LongInt
     properties
         n_words(1, 1) uint64
         num(1, :) uint64
-        sign(1, 1) logical
+        sign(1, 1) int8
     end
     
     methods
@@ -16,15 +16,13 @@ classdef LongInt
                 obj = init_num;
             elseif isa(init_num, 'double')
                 obj = obj.parse_double(init_num);
-            elseif isinteger(init_num) && init_num >= 0
-                obj.num = zeros(1, 1, architecture_uint_type);
-                obj.num(1) = cast(init_num, architecture_uint_type);
+            elseif isinteger(init_num)
+                obj.num = cast(abs(init_num), architecture_uint_type);
+                obj.sign = sign(init_num);
             else
                 throw(MExeption('Cannot construct LongInt from: ' + class(init_num)));
             end
-            
         end
-
 
         function result = bitshift(obj, k)
             arguments
@@ -61,27 +59,40 @@ classdef LongInt
         function [result, carry] = plus(obj, obj2)
             arguments
                 obj(1, 1) LongInt
-                obj2(1, 1) {mustBeArithmetic(obj2)}
+                obj2(1, 1) LongInt
             end
-            
-            if ~isa(obj2, 'LongInt')
-                [result, carry] = plus(obj, LongInt(obj2, obj.n_words * architecture_word_length));
-                return;
-            elseif obj2.n_words == obj.n_words
-                result = LongInt(0, obj.n_words * architecture_word_length);
-    
-                carry_bit = 0;
 
-                for i = 1:obj.n_words
-                    x = obj.num(i);
-                    y = obj2.num(i);
-                    result.num(i) = bitadd(bitadd(x, y), carry_bit);
-                    carry_bit = bitshift(bitor(bitand(x, y), bitand(bitxor(result.num(i), architecture_max_uint), bitor(x, y))), 1 - architecture_word_length);
-                end
+            if obj2.n_words > obj.n_words
+                result = obj2;
+                n = obj.n_words;
             else
-                throw(MExeption('Cannot add numbers of different lengths'));
+                result = obj;
+                n = obj2.n_words;
             end
-            
+
+            carry_bit = 0;
+
+            for i = 1:n
+                x = obj.num(i);
+                y = obj2.num(i);
+                result.num(i) = bitadd(bitadd(x, y), carry_bit);
+                % carry_bit = bitshift(bitor(bitand(x, y), bitand(bitxor(result.num(i), architecture_max_uint), bitor(x, y))), 1 - architecture_word_length);
+                x_n = bitget(x, architecture_word_length);
+                y_n = bitget(y, architecture_word_length);
+                carry_bit = cast((x_n && y_n) || (~bitget(result.num(i), architecture_word_length) && (x_n || y_n)), architecture_uint_type);
+            end
+
+            for i = (n+1):result.n_words
+                result.num(i) = bitadd(result.num(i), carry_bit);
+                carry_bit = cast(bitget(result.num(i), architecture_word_length) && carry_bit, architecture_uint_type);
+            end
+
+            if carry_bit ~= 0
+                result.num = [result.num cast(0, architecture_uint_type)];
+                result.n_words = result.n_words + 1;
+                result.num(result.n_words) = carry_bit;
+            end
+
             carry = carry_bit;
         end
 
@@ -91,7 +102,11 @@ classdef LongInt
                 obj2(1, 1) {mustBeArithmetic(obj2)}
             end
 
-            result = LongInt(obj.num(1) - obj2.num(1));
+            if lt_abs(obj, obj2)
+
+
+            end
+
             carry = false;
         end
 
@@ -131,7 +146,20 @@ classdef LongInt
                 obj2(1, 1) {mustBeArithmetic(obj2)}
             end
 
-            result = LongInt(obj.num(1) / obj2.num(1));
+            if obj.sign < obj2.sign
+                result = true;
+            elseif obj.sign > obj2.sign
+                result = false;
+            else
+                if obj.sign == 1
+                    result = lt_abs(obj, obj2);
+                elseif obj.sign == -1
+                    result = ~lt_abs(obj, obj2);
+                else
+                    result = false;
+                end
+            end
+
             
         end
 
@@ -152,22 +180,44 @@ classdef LongInt
                 num(1, 1) double
             end
 
-            if num < 0
-                throw(MExeption('Cannot parse a negative number into unsigned integer'))
+            if num == 0
+                obj.n_words = 1;
+                obj.num = zeros(1, 1, architecture_uint_type);
+                obj.sign = 0;
             end
-
+            
             frac = bitand(bitshift(intmax(architecture_uint_type), -12), typecast(num, architecture_uint_type)) + bitshift(1, 52);
-            exp = bitshift(bitand(bitshift(bitshift(intmax(architecture_uint_type), 11 - 64), 64 - 12), typecast(num, architecture_uint_type)), -52) - 1023;
+            exp = bitshift(bitand(uint64(9218868437227405312), typecast(num, architecture_uint_type)), -52) - 1023;
             obj.n_words = bits_to_uints(architecture_word_length + double(exp));
             obj.num = zeros(1, obj.n_words, architecture_uint_type);
             obj.num(1) = typecast(frac, architecture_uint_type);
+            obj.sign = sign(num);
             obj = bitshift(obj, -52 + int64(exp));
+        end
+
+        function r = lt_abs(obj, obj2)
+            if obj.n_words < obj2.n_words
+                r = true;
+            elseif obj.n_words > obj2.n_words
+                r = false;
+            else
+                for i = obj.n_words:-1:1
+                    if obj.num(i) < obj2.num(i)
+                        r = true;
+                        return;
+                    elseif obj.num(i) > obj2.num(i)
+                        r = false;
+                        return;
+                    end
+                end
+                r = false;
+            end
         end
     end
 end
 
 function mustBeArithmetic(a)  
-    if ~(isscalar(a) && (isnumeric(a) || isa(a,'LongInt')))
+    if ~(isscalar(a) && (isnumeric(a) || isa(a, 'LongInt')))
         eidType = 'Num:notIntOrLongInt';
         msgType = 'Values assigned to Num property must be an integer or a LongInt.';
         throwAsCaller(MException(eidType,msgType))
