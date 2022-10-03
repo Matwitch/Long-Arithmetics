@@ -118,48 +118,12 @@ classdef LongInt
 
             if obj2.sign == 0
                 result = obj;
-                return;
-            end
-            
-            if obj.sign == obj2.sign
-                if obj2.nwords > obj.nwords
-                    result = obj2;
-                    n = obj.nwords;
-                else
-                    result = obj;
-                    n = obj2.nwords;
-                end
-    
-                carry_bit = 0;
-    
-                for i = 1:n
-                    x = obj.num(i);
-                    y = obj2.num(i);
-                    result.num(i) = bitadd(bitadd(x, y), carry_bit);
-                    % carry_bit = bitshift(bitor(bitand(x, y), bitand(bitxor(result.num(i), architecture_max_uint), bitor(x, y))), 1 - architecture_word_length);
-                    x_n = bitget(x, architecture_word_length);
-                    y_n = bitget(y, architecture_word_length);
-                    carry_bit = cast((x_n && y_n) || (~bitget(result.num(i), architecture_word_length) && (x_n || y_n)), architecture_uint_type);
-                end
-    
-                for i = (n+1):result.nwords
-                    result.num(i) = bitadd(result.num(i), carry_bit);
-                    carry_bit = cast(bitget(result.num(i), architecture_word_length) && carry_bit, architecture_uint_type);
-                end
-    
-                if carry_bit ~= 0
-                    result.num = [result.num cast(0, architecture_uint_type)];
-                    result.nwords = result.nwords + 1;
-                    result.num(result.nwords) = carry_bit;
-                end
+            elseif obj.sign == 0
+                result = obj2;
+            elseif obj.sign == obj2.sign
+                result = add_abs(obj, obj2);
             else
-                if obj2.sign == -1
-                    obj2.sign = -obj2.sign;
-                    result = minus(obj, obj2);
-                else
-                    obj.sign = -obj.sign;
-                    result = minus(obj2, obj);
-                end
+                result = sub_abs(obj, obj2);
             end
         end
 
@@ -171,40 +135,13 @@ classdef LongInt
            
             if obj2.sign == 0
                 result = obj;
-                return;
-            end
-
-            if obj.sign == obj2.sign
-                if lt_abs(obj, obj2)
-                    result = obj2;
-                    temp = obj;
-                    result.sign = -obj2.sign;
-                else
-                    result = obj;
-                    temp = obj2;
-                end
-
-                borrow_bit = cast(0, architecture_uint_type);
-
-                for i = 1:temp.nwords
-                    x = result.num(i);
-                    y = temp.num(i);
-                    result.num(i) = bitsubtract(bitsubtract(x, y), borrow_bit);
-                    x_n = bitget(x, architecture_word_length);
-                    y_n = bitget(y, architecture_word_length);
-                    z_n = bitget(result.num(i), architecture_word_length);
-                    borrow_bit = cast((~x_n && (borrow_bit || y_n)) || (y_n || z_n), architecture_uint_type);
-                end
-
-                for i = temp.nwords+1:result.nwords
-                    result.num(i) = bitsubtract(result.num(i), cast(borrow_bit, architecture_uint_type));
-                    borrow_bit = (~bitget(x, architecture_word_length) && borrow_bit) || bitget(result.num(i), architecture_word_length);
-                end
-
-                result = shrink_to_fit(result);
+            elseif obj.sign == 0
+                result = obj2;
+                result.sign = - result.sign;
+            elseif obj.sign == obj2.sign
+                result = sub_abs(obj, obj2);
             else
-                obj2.sign = - obj2.sign;
-                result = plus(obj, obj2);
+                result = add_abs(obj, obj2);
                 result.sign = obj.sign;
             end
         end
@@ -273,6 +210,67 @@ classdef LongInt
     end
 
     methods(Access = private)
+        function result = add_abs(obj, obj2)
+            carry_bit = 0;
+            
+            if obj2.nwords > obj.nwords
+                result = obj2;
+                n = obj.nwords;
+            else
+                result = obj;
+                n = obj2.nwords;
+            end
+
+            for i = 1:n
+                x = obj.num(i);
+                y = obj2.num(i);
+                result.num(i) = bitadd(bitadd(x, y), carry_bit);
+                carry_bit = bitshift(bitor(bitand(x, y), bitand(bitxor(result.num(i), architecture_max_uint), ...
+                    bitor(x, y))), 1 - architecture_word_length);
+            end
+
+            while carry_bit ~= 0 && i ~= result.nwords + 1
+                result.num(i) = bitadd(result.num(i), 1);
+                carry_bit = (result.num(i) == maxint(architecture_uint_type));
+                i = i + 1;
+            end
+
+            if carry_bit ~= 0
+                result.num = [result.num cast(0, architecture_uint_type)];
+                result.nwords = result.nwords + 1;
+                result.num(result.nwords) = 1;
+            end
+        end
+
+        function result = sub_abs(obj, obj2)
+            borrow_bit = 0;
+            
+            if lt_abs(obj, obj2)
+                result = obj2;
+                result.sign = -result.sign;
+                n = obj.nwords;
+            else
+                result = obj;
+                n = obj2.nwords;
+            end
+
+            for i = 1:n
+                x = result.num(i);
+                y = obj2.num(i);
+                result.num(i) = bitsubtract(bitsubtract(x, y), borrow_bit);
+                borrow_bit = cast(bitor(bitand(bitxor(result.num(i), architecture_max_uint), bitor(borrow_bit, y)), ...
+                    bitor(y, result.num(i))), architecture_uint_type);
+            end
+
+            while borrow_bit ~= 0 && i ~= result.nwords + 1
+                result.num(i) = bitsubtract(result.num(i), 1);
+                borrow_bit = (result.num(i) == 0);
+                i = i + 1;
+            end
+
+            result = shrink_to_fit(result);
+        end
+
         function r = shrink_to_fit(obj)
             n = obj.nwords;
             zero = cast(0, architecture_uint_type);
@@ -284,7 +282,7 @@ classdef LongInt
                     return;
                 end
             end
-            r = LongInt(0);
+            r = LongInt(zero);
         end
 
         function r = lt_abs(obj, obj2)

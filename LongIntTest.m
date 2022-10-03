@@ -18,8 +18,8 @@ classdef LongIntTest < matlab.unittest.TestCase
     
     methods (Test)
         function Test1plus0(testCase, zeroNum, unitNum)
-            testCase.assertEqual(zeroNum.num, 0);
-            testCase.assertEqual(unitNum.num, 1);
+            testCase.assertEqual(zeroNum.num, uint64(0));
+            testCase.assertEqual(unitNum.num, uint64(1));
 
             testCase.verifyEqual(zeroNum + unitNum, unitNum);
         end
