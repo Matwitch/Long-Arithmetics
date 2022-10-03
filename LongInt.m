@@ -1,25 +1,73 @@
 classdef LongInt
     %test push
     properties
-        n_words(1, 1) uint64
+        nwords(1, 1) uint64
         num(1, :) uint64
         sign(1, 1) int8
     end
     
-    methods
+    methods(Static)
+        function res = parse_from_array_test(arr, a_sign)
+            arguments
+                arr uint64 {mustBeVector}
+                a_sign(1,1) {mustBeInRange(a_sign, -1, 1)}
+            end
+
+            if a_sign == 0
+                res = LongInt();
+                return; 
+            end
+
+            res = LongInt(0);
+            res.num = cast(arr, architecture_uint_type);
+            res.nwords = length(arr);
+            res.sign = a_sign;
+        end
+
+        function obj = parse_from_double(num)
+            arguments
+                num(1, 1) double
+            end
+
+            obj = LongInt();
+
+            if num == 0
+                obj.nwords = 1;
+                obj.num = cast(0, architecture_uint_type);
+                obj.sign = 0;
+                return;
+            end
+            
+            frac = bitand(bitshift(intmax(architecture_uint_type), -12), typecast(num, architecture_uint_type)) + bitshift(1, 52);
+            exp = bitshift(bitand(uint64(9218868437227405312), typecast(num, architecture_uint_type)), -52) - 1023;
+            obj.nwords = bits_to_uints(1 + uint64(exp));
+
+            if exp == 0
+                 obj.num = cast(1, architecture_uint_type);
+            else
+                obj.num = zeros(1, obj.nwords, architecture_uint_type);
+                obj.num(1) = typecast(frac, architecture_uint_type);
+                obj = bitshift(obj, -52 + int64(exp));
+            end
+
+            obj.sign = sign(num);
+        end
+    end
+
+    methods(Access = public)
         function obj = LongInt(init_num)
             arguments
-                init_num(1, 1) {mustBeArithmetic(init_num)} = 0
+                init_num(1, 1) {mustBeArithmetic(init_num)} = cast(0, architecture_uint_type)
             end
             
             if isa(init_num, 'LongInt')
                 obj = init_num;
             elseif isa(init_num, 'double')
-                obj = obj.parse_double(init_num);
+                obj = LongInt.parse_from_double(init_num);
             elseif isinteger(init_num)
                 obj.num = cast(abs(init_num), architecture_uint_type);
                 obj.sign = sign(init_num);
-                obj.n_words = 1;
+                obj.nwords = 1;
             else
                 throw(MExeption('Cannot construct LongInt from: ' + class(init_num)));
             end
@@ -39,7 +87,7 @@ classdef LongInt
 
             whole = floor(abs(k / architecture_word_length));
             frac = mod(abs(k), architecture_word_length);
-            n = int64(result.n_words);
+            n = int64(result.nwords);
 
             if k > 0
                 result.num = [zeros(1, whole, architecture_uint_type), result.num(1:(n - whole))];
@@ -74,12 +122,12 @@ classdef LongInt
             end
             
             if obj.sign == obj2.sign
-                if obj2.n_words > obj.n_words
+                if obj2.nwords > obj.nwords
                     result = obj2;
-                    n = obj.n_words;
+                    n = obj.nwords;
                 else
                     result = obj;
-                    n = obj2.n_words;
+                    n = obj2.nwords;
                 end
     
                 carry_bit = 0;
@@ -94,15 +142,15 @@ classdef LongInt
                     carry_bit = cast((x_n && y_n) || (~bitget(result.num(i), architecture_word_length) && (x_n || y_n)), architecture_uint_type);
                 end
     
-                for i = (n+1):result.n_words
+                for i = (n+1):result.nwords
                     result.num(i) = bitadd(result.num(i), carry_bit);
                     carry_bit = cast(bitget(result.num(i), architecture_word_length) && carry_bit, architecture_uint_type);
                 end
     
                 if carry_bit ~= 0
                     result.num = [result.num cast(0, architecture_uint_type)];
-                    result.n_words = result.n_words + 1;
-                    result.num(result.n_words) = carry_bit;
+                    result.nwords = result.nwords + 1;
+                    result.num(result.nwords) = carry_bit;
                 end
             else
                 if obj2.sign == -1
@@ -138,7 +186,7 @@ classdef LongInt
 
                 borrow_bit = cast(0, architecture_uint_type);
 
-                for i = 1:temp.n_words
+                for i = 1:temp.nwords
                     x = result.num(i);
                     y = temp.num(i);
                     result.num(i) = bitsubtract(bitsubtract(x, y), borrow_bit);
@@ -148,7 +196,7 @@ classdef LongInt
                     borrow_bit = cast((~x_n && (borrow_bit || y_n)) || (y_n || z_n), architecture_uint_type);
                 end
 
-                for i = temp.n_words+1:result.n_words
+                for i = temp.nwords+1:result.nwords
                     result.num(i) = bitsubtract(result.num(i), cast(borrow_bit, architecture_uint_type));
                     borrow_bit = (~bitget(x, architecture_word_length) && borrow_bit) || bitget(result.num(i), architecture_word_length);
                 end
@@ -223,42 +271,15 @@ classdef LongInt
             result = isequal(obj.num, obj2.num) && isequal(obj.sign, obj2.sign);
         end
     end
+
     methods(Access = private)
-        function obj = parse_double(obj, num)
-            arguments
-                obj(1, 1) LongInt
-                num(1, 1) double
-            end
-
-            if num == 0
-                obj.n_words = 1;
-                obj.num = cast(0, architecture_uint_type);
-                obj.sign = 0;
-                return;
-            end
-            
-            frac = bitand(bitshift(intmax(architecture_uint_type), -12), typecast(num, architecture_uint_type)) + bitshift(1, 52);
-            exp = bitshift(bitand(uint64(9218868437227405312), typecast(num, architecture_uint_type)), -52) - 1023;
-            obj.n_words = bits_to_uints(1 + uint64(exp));
-
-            if exp == 0
-                 obj.num = cast(1, architecture_uint_type);
-            else
-                obj.num = zeros(1, obj.n_words, architecture_uint_type);
-                obj.num(1) = typecast(frac, architecture_uint_type);
-                obj = bitshift(obj, -52 + int64(exp));
-            end
-
-            obj.sign = sign(num);
-        end
-
         function r = shrink_to_fit(obj)
-            n = obj.n_words;
+            n = obj.nwords;
             zero = cast(0, architecture_uint_type);
             for i = n:-1:1
                 if obj.num(i) ~= zero
                     obj.num = obj.num(1:i);
-                    obj.n_words = i;
+                    obj.nwords = i;
                     r = obj;
                     return;
                 end
@@ -267,12 +288,12 @@ classdef LongInt
         end
 
         function r = lt_abs(obj, obj2)
-            if obj.n_words < obj2.n_words
+            if obj.nwords < obj2.nwords
                 r = true;
-            elseif obj.n_words > obj2.n_words
+            elseif obj.nwords > obj2.nwords
                 r = false;
             else
-                for i = obj.n_words:-1:1
+                for i = obj.nwords:-1:1
                     if obj.num(i) < obj2.num(i)
                         r = true;
                         return;
