@@ -4,8 +4,66 @@ classdef LongInt
         sign(1, 1) int8
     end
     
-    methods(Static)
-        function res = parse_from_array_test(arr, a_sign)
+    methods(Static, Access = public)
+        function obj = from_hex(hex_str)
+            arguments
+                hex_str(1, :) char
+            end
+
+            s = 1;
+
+            if hex_str(1) == '-'
+                s = -1;
+                hex_str = hex_str(2:end);
+            end
+
+            if mod(strlength(hex_str), 16) ~= 0
+                q = strlength(hex_str) / 16;
+
+                hex_str = [num2str(zeros(1, 16 * (floor(q) + 1) - strlength(hex_str)), '%d') hex_str];
+            end
+
+            num = zeros(1, strlength(hex_str) / 16, architecture_uint_type);
+
+            n = length(num);
+            for i = n:-1:1
+                k = architecture_zero;
+                hex = hex_str((i-1)*16+1:i*16);
+
+                for j = 16:-1:1
+                    k = bitor(k, bitshift(LongInt.hex2uint(hex(j)), (16 - j) * 4));
+                end
+                
+                num(n - i + 1) = k;
+            end
+    
+            obj = shrink_to_fit(LongInt.parse_from_array(num, s));
+        end
+
+        function h = uint2hex(n)
+            arguments
+                n(1, 1) uint64
+            end
+
+            h(16) = char('0');
+            mask = cast(15, architecture_uint_type);
+
+            for i = 1:16
+                a = bitshift(bitand(n, bitshift(mask, (i - 1) * 4)), (1 - i) * 4);
+                
+                if a < 10
+                    h(i) = num2str(a);
+                else
+                    h(i) = cast(cast('A', 'uint64') + a - 10, 'char');
+                end
+            end
+
+            h = flip(h);
+        end
+    end
+
+    methods(Static, Access = private)
+        function res = parse_from_array(arr, a_sign)
             arguments
                 arr uint64 {mustBeVector}
                 a_sign(1,1) {mustBeInRange(a_sign, -1, 1)}
@@ -16,8 +74,8 @@ classdef LongInt
                 return; 
             end
 
-            res = LongInt(0);
-            res.num = cast(arr, architecture_uint_type);
+            res = LongInt();
+            res.num = arr;
             res.sign = a_sign;
         end
 
@@ -48,12 +106,29 @@ classdef LongInt
 
             obj.sign = sign(num);
         end
+
+        function n = hex2uint(c)
+            arguments
+                c(1, 1) char
+            end
+                
+            a = cast(c, 'uint64');
+
+            if  a <= cast('9', 'uint64') && a >= cast('0', 'uint64')
+                n = cast(a - cast('0', 'uint64'), architecture_uint_type);
+            elseif a <= cast('F', 'uint64') && a >= cast('A', 'uint64')
+                n = cast((a - cast('A', 'uint64')) + 10, architecture_uint_type);
+            else
+                throw(MException('LongInt:wrongChar', ' ''%s'' is not a legit hexidecimal digit.', c));
+            end
+        end
+
     end
 
     methods(Access = public)
         function obj = LongInt(init_num)
             arguments
-                init_num(1, 1) {mustBeArithmetic(init_num)} = architecture_zero
+                init_num(1, 1) = architecture_zero
             end
             
             if isa(init_num, 'LongInt')
@@ -64,7 +139,7 @@ classdef LongInt
                 obj.num = cast(abs(init_num), architecture_uint_type);
                 obj.sign = sign(init_num);
             else
-                throw(MExeption('Cannot construct LongInt from: ' + class(init_num)));
+                throw(MException('LongInt:wrongType', 'Cannot construct LongInt from type: %s', class(init_num)));
             end
         end
 
@@ -212,6 +287,27 @@ classdef LongInt
 
             result = isequal(obj.num, obj2.num) && isequal(obj.sign, obj2.sign);
         end
+ 
+        function result = to_hex(obj)
+            arguments
+                obj(1, 1) LongInt
+            end
+
+            n = obj.nwords;
+
+            result(16 * n) = char(1);
+
+            for i = n:-1:1                
+                result((i-1)*16+1:i*16) = LongInt.uint2hex(obj.num(n - i + 1));                
+            end
+
+            k = 1;
+            while result(k) == '0'
+                k = k + 1;
+            end
+
+            result = result(k:end);
+        end
     end
 
     methods(Access = private)
@@ -338,14 +434,6 @@ classdef LongInt
                 r = false;
             end
         end
-    end
-end
-
-function mustBeArithmetic(a)  
-    if ~(isscalar(a) && (isnumeric(a) || isa(a, 'LongInt')))
-        eidType = 'Num:notIntOrLongInt';
-        msgType = 'Values assigned to Num property must be an integer or a LongInt.';
-        throwAsCaller(MException(eidType,msgType))
     end
 end
 
