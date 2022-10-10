@@ -40,6 +40,22 @@ classdef LongInt
             obj = shrink_to_fit(LongInt.parse_from_array(num, s));
         end
 
+        function res = parse_from_array(arr, a_sign)
+            arguments
+                arr uint64 {mustBeVector}
+                a_sign(1,1) {mustBeInRange(a_sign, -1, 1)}
+            end
+
+            if a_sign == 0
+                res = LongInt();
+                return; 
+            end
+
+            res = LongInt();
+            res.num = arr;
+            res.sign = a_sign;
+        end
+
         function h = uint2hex(n)
             arguments
                 n(1, 1) uint64
@@ -62,23 +78,8 @@ classdef LongInt
         end
     end
 
+
     methods(Static, Access = private)
-        function res = parse_from_array(arr, a_sign)
-            arguments
-                arr uint64 {mustBeVector}
-                a_sign(1,1) {mustBeInRange(a_sign, -1, 1)}
-            end
-
-            if a_sign == 0
-                res = LongInt();
-                return; 
-            end
-
-            res = LongInt();
-            res.num = arr;
-            res.sign = a_sign;
-        end
-
         function obj = parse_from_double(num)
             arguments
                 num(1, 1) double
@@ -87,7 +88,6 @@ classdef LongInt
             obj = LongInt();
 
             if num == 0
-                obj.nwords = 1;
                 obj.num = architecture_zero;
                 obj.sign = 0;
                 return;
