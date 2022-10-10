@@ -10,17 +10,17 @@ classdef LongIntTest < matlab.unittest.TestCase
         anyNum2 = num2cell(arrayfun(@(x) LongInt.parse_from_array(randuint64(1, x), randi([-1, 1], 1)), ...
             randi(anyNum_max_length, 1, anyNum_test_n)));
 
-        anyPosNum = num2cell(arrayfun(@(x) LongInt.parse_from_array(randuint64(1, x), 1), ...
-            randi(anyNum_max_length, 1, anyNum_test_n)));
+        %anyPosNum = num2cell(arrayfun(@(x) LongInt.parse_from_array(randuint64(1, x), 1), ...
+        %    randi(anyNum_max_length, 1, anyNum_test_n)));
 
-        anyNegNum = num2cell(arrayfun(@(x) LongInt.parse_from_array(randuint64(1, x), -1), ...
-            randi(anyNum_max_length, 1, anyNum_test_n)));
+        %anyNegNum = num2cell(arrayfun(@(x) LongInt.parse_from_array(randuint64(1, x), -1), ...
+        %    randi(anyNum_max_length, 1, anyNum_test_n)));
 
-        anyPosNum64bit = num2cell(arrayfun(@(x) LongInt(x), randuint64(1, anyNum_test_n)));
-        anyNegNum64bit = num2cell(arrayfun(@(x) -LongInt(x), randuint64(1, anyNum_test_n)));
+        %anyPosNum64bit = num2cell(arrayfun(@(x) LongInt(x), randuint64(1, anyNum_test_n)));
+        %anyNegNum64bit = num2cell(arrayfun(@(x) -LongInt(x), randuint64(1, anyNum_test_n)));
 
-        anyDouble = num2cell(arrayfun(@(x) typecast(x, 'double'), randuint64(1, anyNum_test_n)))
-        anyInteger = num2cell(arrayfun(@(x) typecast(x, 'int64'), randuint64(1, anyNum_test_n)))
+        %anyDouble = num2cell(arrayfun(@(x) typecast(x, 'double'), randuint64(1, anyNum_test_n)))
+        %anyInteger = num2cell(arrayfun(@(x) typecast(x, 'int64'), randuint64(1, anyNum_test_n)))
     end
     
     methods (Test)
@@ -78,7 +78,7 @@ classdef LongIntTest < matlab.unittest.TestCase
 end
 
 function n = anyNum_test_n()
-    n = 2^13;
+    n = 2^12;
 end
 
 function n = anyNum_max_length()
