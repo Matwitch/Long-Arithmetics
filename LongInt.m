@@ -1,7 +1,7 @@
 classdef LongInt
     properties
         num(1, :) uint64
-        sign(1, 1) int8
+        sign(1, 1) int64
     end
     
     methods(Static, Access = public)
@@ -160,7 +160,8 @@ classdef LongInt
             frac = mod(abs(k), architecture_word_length);
 
             if k > 0
-                result.num = [zeros(1, whole, architecture_uint_type), result.num, architecture_zero];
+                t = obj.nwords * architecture_word_length - abs(obj.msb_pos) - frac;
+                result.num = [zeros(1, whole, architecture_uint_type), result.num];
                 
                 for i = 1:result.nwords
                     r = result.num(i);
@@ -183,6 +184,11 @@ classdef LongInt
         function result = uminus(obj)
             result = obj;
             result.sign = -result.sign;
+        end
+
+        function result = abs(obj)
+            result = obj;
+            result.sign = 1;
         end
 
         function result = plus(obj, obj2)
@@ -256,10 +262,27 @@ classdef LongInt
             carry = false;
         end
 
+        function pos = msb_pos(obj)
+            arguments
+                obj(1, 1) LongInt
+            end
+
+            n = obj.num(obj.nwords);
+            m = bitand(n, bitcmp(bitsubtract(n, architecture_unit), architecture_uint_type));
+
+            k = 0;
+            while m ~= 0
+                m = bitshift(m, -1);
+                k = k + 1;
+            end
+
+            pos = (((obj.nwords - 1) * architecture_word_length) + k) * obj.sign;
+        end
+
         function result = lt(obj, obj2)
             arguments
                 obj(1, 1) LongInt
-                obj2(1, 1) {mustBeArithmetic(obj2)}
+                obj2(1, 1) LongInt
             end
 
             if obj.sign < obj2.sign
@@ -441,6 +464,10 @@ function a = architecture_zero()
     a = cast(0, architecture_uint_type);
 end
 
+function a = architecture_unit()
+    a = cast(1, architecture_uint_type);
+end
+
 function a = architecture_uint_type()
     a = 'uint' + string(architecture_word_length);
 end
@@ -458,11 +485,7 @@ function a = bits_to_uints(bits_num)
 end
 
 function res = bitsubtract(num1, num2)
-    res = bitadd(bitadd(num1, bitcomplement(num2)), 1);
-end
-
-function res = bitcomplement(num)
-    res = intmax(architecture_uint_type) - num;
+    res = bitadd(bitadd(num1, bitcmp(num2)), 1);
 end
 
 function int1 = bitadd(int1, int2)
