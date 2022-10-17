@@ -1,4 +1,12 @@
 classdef LongInt
+    properties (Constant)
+        architecture_word_length = 64;
+        architecture_uint_type = 'uint' + string(architecture_word_length);
+        architecture_zero = cast(0, architecture_uint_type);
+        architecture_unit = cast(1, architecture_uint_type);
+        architecture_max_uint = intmax(architecture_uint_type);
+    end
+
     properties
         num(1, :) uint64
         sign(1, 1) int64
@@ -160,8 +168,9 @@ classdef LongInt
             frac = mod(abs(k), architecture_word_length);
 
             if k > 0
-                t = obj.nwords * architecture_word_length - abs(obj.msb_pos) - frac;
-                result.num = [zeros(1, whole, architecture_uint_type), result.num];
+                t = ceil(double(frac - (obj.nwords * architecture_word_length - abs(obj.msb_pos))) / ...
+                    double(architecture_word_length));
+                result.num = [zeros(1, whole, architecture_uint_type), result.num, zeros(1, t, architecture_uint_type)];
                 
                 for i = 1:result.nwords
                     r = result.num(i);
@@ -169,16 +178,19 @@ classdef LongInt
                     carry_shift = bitshift(r, (frac - architecture_word_length));
                 end
             else
-                result.num = result.num((whole + 1):result.nwords);
+                t = ceil(double(frac - (abs(obj.msb_pos) - (obj.nwords - 1) * architecture_word_length)) / ...
+                    double(architecture_word_length));
 
-                for i = result.nwords:-1:1
-                    r = result.num(i);
-                    result.num(i) = bitor(bitshift(r, -frac), carry_shift);
+                temp = result.num((whole + 1):result.nwords);
+                
+                for i = length(temp):-1:1
+                    r = temp(i);
+                    temp(i) = bitor(bitshift(r, -frac), carry_shift);
                     carry_shift = bitshift(r, architecture_word_length - frac);
                 end
-            end
 
-            result = shrink_to_fit(result);
+                result.num = temp(1:end - t);
+            end
         end
 
         function result = uminus(obj)
@@ -331,13 +343,27 @@ classdef LongInt
 
             result = result(k:end);
         end
+        
     end
-
     methods(Access = private)
         function n = nwords(obj)
             n = length(obj.num);
         end
 
+        function result = digit_mult(obj, dig)
+            arguments
+                obj(1, 1) LongInt
+                dig(1, 1) uint64 
+            end
+            
+            if obj.sign == 0 || dig == 0
+                result = LongInt();
+                return;
+            end
+
+            
+        end
+        
         function result = add_abs(obj, obj2)
             carry_bit = architecture_zero;
             
