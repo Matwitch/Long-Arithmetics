@@ -1,4 +1,4 @@
-classdef LongInt
+classdef LongInt < matlab.mixin.CustomDisplay
     properties (Constant)
         arch_w_len = 64;
         arch_uint_t = 'uint' + string(LongInt.arch_w_len);
@@ -14,6 +14,19 @@ classdef LongInt
         sign(1, 1) int64
     end
     
+   methods (Access = protected)
+       function propgrp = getPropertyGroups(obj)
+          if ~isscalar(obj)
+             propgrp = getPropertyGroups@matlab.mixin.CustomDisplay(obj);
+          else
+             propList = struct('sign',obj.sign,...
+                'num_arr',obj.num,...
+                'num_hex',obj.to_hex());
+             propgrp = matlab.mixin.util.PropertyGroup(propList);
+          end
+       end
+    end
+
     methods(Static, Access = public)
         function obj = from_hex(hex_str)
             arguments
@@ -33,11 +46,11 @@ classdef LongInt
                 hex_str = [num2str(zeros(1, 16 * (floor(q) + 1) - strlength(hex_str)), '%d') hex_str];
             end
 
-            num = zeros(1, strlength(hex_str) / 16, arch_uint_t);
+            num = zeros(1, strlength(hex_str) / 16, LongInt.arch_uint_t);
 
             n = length(num);
             for i = n:-1:1
-                k = arch_zero;
+                k = LongInt.arch_zero;
                 hex = hex_str((i-1)*16+1:i*16);
 
                 for j = 16:-1:1
@@ -63,6 +76,7 @@ classdef LongInt
 
             res = LongInt();
             res.num = arr;
+            res = res.shrink_to_fit();
             res.sign = a_sign;
         end
 
@@ -72,7 +86,7 @@ classdef LongInt
             end
 
             h(16) = char('0');
-            mask = cast(15, arch_uint_t);
+            mask = cast(15, LongInt.arch_uint_t);
 
             for i = 1:16
                 a = bitshift(bitand(n, bitshift(mask, (i - 1) * 4)), (1 - i) * 4);
@@ -107,7 +121,7 @@ classdef LongInt
                 B1 = LongInt.parse_from_array(temp((n / 2) + 1:end), 1);
             else
                 if mod(B.nwords, 2) ~= 0
-                    n = b.nwords + 1;
+                    n = B.nwords + 1;
                     B0 = LongInt.parse_from_array(B.num(1:(n/2)), 1);
                     B1 = LongInt.parse_from_array([B.num((n / 2) + 1:end) LongInt.arch_zero], 1);
                 else
@@ -149,7 +163,7 @@ classdef LongInt
                 obj.num(1) = typecast(frac, LongInt.arch_uint_t);
                 obj = bitshift(obj, -52 + int64(exp));
             end
-
+            obj = obj.shrink_to_fit();
             obj.sign = sign(num);
         end
 
@@ -161,9 +175,9 @@ classdef LongInt
             a = cast(c, 'uint64');
 
             if  a <= cast('9', 'uint64') && a >= cast('0', 'uint64')
-                n = cast(a - cast('0', 'uint64'), arch_uint_t);
+                n = cast(a - cast('0', 'uint64'), LongInt.arch_uint_t);
             elseif a <= cast('F', 'uint64') && a >= cast('A', 'uint64')
-                n = cast((a - cast('A', 'uint64')) + 10, arch_uint_t);
+                n = cast((a - cast('A', 'uint64')) + 10, LongInt.arch_uint_t);
             else
                 throw(MException('LongInt:wrongChar', ' ''%s'' is not a legit hexidecimal digit.', c));
             end
@@ -216,34 +230,34 @@ classdef LongInt
                 return;
             end
 
-            whole = floor(abs(double(k) / obj.arch_w_len));
-            frac = mod(abs(k), obj.arch_w_len);
+            whole = floor(abs(double(k) / LongInt.arch_w_len));
+            frac = mod(abs(k), LongInt.arch_w_len);
 
             if k > 0
-                t = ceil(double(frac - (obj.nwords * obj.arch_w_len - abs(obj.msb_pos))) / ...
-                    double(obj.arch_w_len));
-                result.num = [zeros(1, whole, obj.arch_uint_t), result.num, zeros(1, t, obj.arch_uint_t)];
+                t = ceil(double(frac - (obj.nwords * LongInt.arch_w_len - abs(obj.msb_pos))) / ...
+                    double(LongInt.arch_w_len));
+                result.num = [zeros(1, whole, LongInt.arch_uint_t), result.num, zeros(1, t, LongInt.arch_uint_t)];
                 
                 if frac ~= 0
                     for i = 1:result.nwords
                         r = result.num(i);
                         result.num(i) = bitor(bitshift(r, frac), carry_shift);
-                        carry_shift = bitshift(r, (frac - obj.arch_w_len));
+                        carry_shift = bitshift(r, (frac - LongInt.arch_w_len));
                     end
                 end
             else
-                t = ceil(double(frac - (abs(obj.msb_pos) - (obj.nwords - 1) * obj.arch_w_len)) / ...
-                    double(obj.arch_w_len));
+                t = ceil((double((abs(obj.msb_pos) - (obj.nwords - 1) * LongInt.arch_w_len)) - double(frac)) / ...
+                    double(LongInt.arch_w_len));
 
                 temp = result.num((whole + 1):result.nwords);
                 if frac ~= 0
                     for i = length(temp):-1:1
                         r = temp(i);
                         temp(i) = bitor(bitshift(r, -frac), carry_shift);
-                        carry_shift = bitshift(r, obj.arch_w_len - frac);
+                        carry_shift = bitshift(r, LongInt.arch_w_len - frac);
                     end
                 end
-                result.num = temp(1:end - t);
+                result.num = temp(1:end + (t - 1));
             end
         end
 
@@ -350,13 +364,16 @@ classdef LongInt
                 obj(1, 1) LongInt
             end
 
-            n = obj.num(obj.nwords);
-            m = bitand(n, bitcmp(bitsubtract(n, LongInt.arch_unit), LongInt.arch_uint_t));
+            if obj.sign == 0
+                pos = 0;
+                return;
+            end
 
-            k = 0;
-            while m ~= 0
-                m = bitshift(m, -1);
-                k = k + 1;
+            m = obj.num(end);
+
+            k = LongInt.arch_w_len;
+            while (bitget(m, k, LongInt.arch_uint_t) == 0)
+                k = k - 1;
             end
 
             pos = (((obj.nwords - 1) * LongInt.arch_w_len) + k) * obj.sign;
@@ -397,6 +414,11 @@ classdef LongInt
         function result = to_hex(obj)
             arguments
                 obj(1, 1) LongInt
+            end
+
+            if obj.sign == 0
+                result = '0';
+                return;
             end
 
             n = obj.nwords;
@@ -478,7 +500,7 @@ classdef LongInt
 
             if carry_bit ~= 0
                 result.num = [result.num, LongInt.arch_zero];
-                result.num(result.nwords) = 1;
+                result.num(result.nwords) = LongInt.arch_unit;
             end
         end
 
@@ -495,7 +517,7 @@ classdef LongInt
             i = i + 1;
 
             while borrow_bit ~= 0 && i ~= obj.nwords + 1
-                obj.num(i) = bitsubtract(obj.num(i), 1);
+                obj.num(i) = bitsubtract(obj.num(i), LongInt.arch_unit);
                 borrow_bit = (obj.num(i) == 0);
                 i = i + 1;
             end
@@ -541,14 +563,13 @@ classdef LongInt
 
         function obj = shrink_to_fit(obj)
             n = obj.nwords;
-            zero = cast(0, LongInt.arch_uint_t);
             for i = n:-1:1
-                if obj.num(i) ~= zero
+                if obj.num(i) ~= LongInt.arch_zero
                     obj.num = obj.num(1:i);
                     return;
                 end
             end
-            obj = LongInt(zero);
+            obj = LongInt(LongInt.arch_zero);
         end
 
         function r = lt_abs(obj, obj2)
