@@ -9,6 +9,9 @@ classdef LongIntTest < matlab.unittest.TestCase
 
         anyNum2 = num2cell(arrayfun(@(x) LongInt.parse_from_array(randuint64(1, x), randi([-1, 1], 1)), ...
             randi(anyNum_max_length, 1, anyNum_test_n)));
+        
+        anyNum3 = num2cell(arrayfun(@(x) LongInt.parse_from_array(randuint64(1, x), randi([-1, 1], 1)), ...
+            randi(anyNum_max_length, 1, anyNum_test_n)));
 
         %anyPosNum = num2cell(arrayfun(@(x) LongInt.parse_from_array(randuint64(1, x), 1), ...
         %    randi(anyNum_max_length, 1, anyNum_test_n)));
@@ -49,7 +52,7 @@ classdef LongIntTest < matlab.unittest.TestCase
             B3 = LongInt.from_hex('DAF1ABDA4AD4D9FE3E36A529210C2AE99B905922FC0519798A26E351FE23AF375AD6BA288EE030B70DF0CE1CDF1E8B75BA56494DC6ED36B181814CD5783E6C81');
             C3 = LongInt.from_hex('1282E3D9FC497A01FA39E4A4D3720E04B496FCFE7B76AB7E9721D434968B53BBB99DB12DC7E25AC849E13A5A477C11FD8A6F0109C2D619FB3E9553659BA90201E');
             CC3 = LongInt(0);
-            A3B3 = LongInt.from_hex('E1DD0ECBC0569D86631305BDF6715FFAE730E73504AC45962E5E8A4CCA50C2D7B5D56963ECBC7B581E820835EE00B1F6F4E43072F98CA5016E51A666B575C90A2FABBAC111435C86550EFDA9C4924D9A503777A0A1DE78C286E2FD73CAA861C3EA1E84053250CA2A235AF93C8AC105A08D3049909464394D6D16598FBAE735944C2D41C2E1F01C97428069CF3427FB8ED246CF15F163DFC385EDADF2EBE1A8900ECA0A6D6F4B3008FF1CB371BA03EFFEE3EFAF01E13673FCECA3A93CA89CBF8ABAEEF060B773F10B174A5E13BE3831195662FABDF07153F027C9617A67D65BCFB154EA70454CA6E8CDA2B118CF8A785AF2EDCBA40BE070FADCD57D8F26620A');
+            A3B3 = LongInt.from_hex('420E7E00B61E41A4992910FF7147F0D7DA534119BBD5BEE7EED2228604052A727147B4F01045272387643BC83E8AA54DD691149A58B77C0F3A39F7106AE22235D913D365494B7CC17BFE8294FAB72F34FA3230E1C9E8B145CCFEB672C73C922FF09ADFECFFCEB236A23A55C66904584EAC31CFA3B6A4DBC253D4E13BFAF7BE1D');
 
             testCase.verifyEqual(A3 + B3, C3);
             testCase.verifyTrue((A3 - B3) < CC3);
@@ -59,12 +62,20 @@ classdef LongIntTest < matlab.unittest.TestCase
             B4 = LongInt.from_hex('D4DA433DBC99DE3D9F192F4B84000A628F00F01D10532B8299BE4987E001E2F23137039D7106217C58800406778F64750E949A6D229AC61FCD424632593C4735');
             C4 = LongInt.from_hex('17B3E5CD8FEE83E9EC5BC4AD2E23D69012B2F03F3A9AFF3847FCA79AC580A89E0331E8C335274CF118DCFE9110B263EB26A6FFD951E92A431545E3A026D6C9D21');
             CC4 = LongInt(0);
-            A4B4 = LongInt.from_hex('5ED492797CDB6D1CE4FE2BA7F7C7CC8CA220007237417066C8B77645FCA22793632F9630BB870AFA527B9A34A4D400B881ADE6CD421267BB820578EEE043A65029E3B808FCA0338883F91C54928E1BB8F1067CAEE97301250AF9C0A54302E25C5404D0D9AE7A2E9AFA450EA79D3CB1311B36BA0389FABE5D4CCCED13B6B777866EBA7A6E315EEF89AF3A7D91C8F20CD9A9DED3AB508991B855E5D1BE089D325324E1E8DAA1CE17B8895751E24BD2AFE25B22E8CD199DD97BE7D7931FEB9860693536E4F271EBF41F49A243D4179FA21102CBD941FDE6DFB0DA7A41967BDAB85A10D3923221A9E73FDAFF5026B93A7E8423D4C02D4FDA0D7B4D5DA96477D91CCA');
+            A4B4 = LongInt.from_hex('8A58C226B4429FFC0493D57D8B3EF3048C3C82269D5C2CC9E4F40A078C09107AD50C637D281E740790C76BC0D9DC9243D90DCE7BB8FA9FDA799D0C80BC2913E8B6B2E24CE7FCFD72F6D14F2539E68E80AB31B0265E16DAED3B4FA75091FC11E27C69FD3FAFEC5CB66CE5796E01D3F091D140CE0E6D33956B80F908F8C5263DDC');
 
             testCase.verifyEqual(A4 + B4, C4);
             testCase.verifyTrue((A4 - B4) < CC4);
             testCase.verifyEqual(A4 * B4, A4B4);
 
+        end
+
+        function TestMultUnit(testCase, unitNum ,anyNum1)
+            testCase.verifyEqual(anyNum1 * unitNum, anyNum1);
+        end
+
+        function TestMultZero(testCase, zeroNum ,anyNum1)
+            testCase.verifyEqual(anyNum1 * zeroNum, zeroNum);
         end
 
         function TestPlus0(testCase, zeroNum, anyNum1)
@@ -96,6 +107,40 @@ classdef LongIntTest < matlab.unittest.TestCase
             testCase.verifyEqual(anyNum1 + anyNum2, anyNum2 + anyNum1);
         end
         
+        function TestDistributiveness(testCase, anyNum1, anyNum2, anyNum3)
+            testCase.verifyEqual(anyNum3 * (anyNum1 + anyNum2), (anyNum3 * anyNum2) + (anyNum3 * anyNum1));
+        end
+
+        function TestDivision1(testCase, anyNum1, anyNum2)
+            temp = (anyNum1 * anyNum2);
+            zero = LongInt(LongInt.arch_zero);
+            
+            if ~isequal(anyNum1, zero)
+                testCase.verifyEqual(temp / anyNum1, anyNum2);
+            end
+
+            if ~isequal(anyNum2, zero)
+                testCase.verifyEqual(temp / anyNum2, anyNum1);
+            end
+            
+            if ~isequal(anyNum1, zero) && ~isequal(anyNum2, zero)
+                testCase.verifyEqual(temp / (anyNum1 * anyNum2), LongInt(1));
+                testCase.verifyEqual((temp / anyNum1) / anyNum2, LongInt(1));
+                testCase.verifyEqual((temp / anyNum2) / anyNum1, LongInt(1));
+            end
+        end
+
+        function TestModAndDiv(testCase, anyNum1, anyNum2)
+            if anyNum2.sign ~= 0
+                x = abs(anyNum1);
+                y = abs(anyNum2);
+                q = x / y;
+                r = mod(x, y);
+    
+                testCase.verifyEqual((q * y) + r, x);
+            end
+        end
+
         function TestNegDistributive(testCase, anyNum1, anyNum2)
             testCase.verifyEqual(-(anyNum1 + anyNum2), -anyNum1 - anyNum2);
         end

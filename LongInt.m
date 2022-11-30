@@ -1,4 +1,4 @@
-classdef LongInt < matlab.mixin.CustomDisplay
+classdef LongInt < handle & matlab.mixin.CustomDisplay
     properties (Constant)
         arch_w_len = 64;
         arch_uint_t = 'uint' + string(LongInt.arch_w_len);
@@ -7,6 +7,7 @@ classdef LongInt < matlab.mixin.CustomDisplay
         arch_max_uint = intmax(LongInt.arch_uint_t);
 
         karatsuba_threshold = 4;
+        horner_window = 6;
     end
 
     properties
@@ -60,7 +61,8 @@ classdef LongInt < matlab.mixin.CustomDisplay
                 num(n - i + 1) = k;
             end
     
-            obj = shrink_to_fit(LongInt.parse_from_array(num, s));
+            obj = LongInt.parse_from_array(num, s);
+            obj.shrink_to_fit();
         end
 
         function res = parse_from_array(arr, a_sign)
@@ -76,8 +78,8 @@ classdef LongInt < matlab.mixin.CustomDisplay
 
             res = LongInt();
             res.num = arr;
-            res = res.shrink_to_fit();
             res.sign = a_sign;
+            res.shrink_to_fit();
         end
 
         function h = uint2hex(n)
@@ -105,34 +107,44 @@ classdef LongInt < matlab.mixin.CustomDisplay
 
     methods(Static, Access = private)
         function [A0, A1, B0, B1] = karatsuba_part(A, B)
+            A0 = LongInt();
+            A1 = LongInt();
+            B0 = LongInt();
+            B1 = LongInt();
+            
+            A0.sign = 1;
+            A1.sign = 1;
+            B0.sign = 1;
+            B1.sign = 1;
+
             if A.nwords > B.nwords
                 if mod(A.nwords, 2) ~= 0
                     n = A.nwords + 1;
-                    A0 = LongInt.parse_from_array(A.num(1:(n/2)), 1);
-                    A1 = LongInt.parse_from_array([A.num((n / 2) + 1:end) LongInt.arch_zero], 1);
+                    A0.num = A.num(1:(n/2));
+                    A1.num = [A.num((n / 2) + 1:end) LongInt.arch_zero];
                 else
                     n = A.nwords;
-                    A0 = LongInt.parse_from_array(A.num(1:(n / 2)), 1);
-                    A1 = LongInt.parse_from_array(A.num((n / 2) + 1:end), 1);
+                    A0.num = A.num(1:(n / 2));
+                    A1.num = A.num((n / 2) + 1:end);
                 end
                 
                 temp = [B.num zeros(1, n - B.nwords, LongInt.arch_uint_t)];
-                B0 = LongInt.parse_from_array(temp(1:(n/2)), 1);
-                B1 = LongInt.parse_from_array(temp((n / 2) + 1:end), 1);
+                B0.num = temp(1:(n/2));
+                B1.num = temp((n / 2) + 1:end);
             else
                 if mod(B.nwords, 2) ~= 0
                     n = B.nwords + 1;
-                    B0 = LongInt.parse_from_array(B.num(1:(n/2)), 1);
-                    B1 = LongInt.parse_from_array([B.num((n / 2) + 1:end) LongInt.arch_zero], 1);
+                    B0.num = B.num(1:(n/2));
+                    B1.num = [B.num((n / 2) + 1:end) LongInt.arch_zero];
                 else
                     n = B.nwords;
-                    B0 = LongInt.parse_from_array(B.num(1:(n / 2)), 1);
-                    B1 = LongInt.parse_from_array(B.num((n / 2) + 1:end), 1);
+                    B0.num = B.num(1:(n / 2));
+                    B1.num = B.num((n / 2) + 1:end);
                 end
                 
                 temp = [A.num zeros(1, n - A.nwords, LongInt.arch_uint_t)];
-                A0 = LongInt.parse_from_array(temp(1:(n/2)), 1);
-                A1 = LongInt.parse_from_array(temp((n / 2) + 1:end), 1);
+                A0.num = temp(1:(n/2));
+                A1.num = temp((n / 2) + 1:end);
             end
         end
 
@@ -157,13 +169,14 @@ classdef LongInt < matlab.mixin.CustomDisplay
             exp = bitshift(bitand(uint64(9218868437227405312), typecast(num, LongInt.arch_uint_t)), -52) - 1023;
 
             if exp == 0
-                 obj.num = cast(1, LongInt.arch_uint_t);
+                 obj.num = LongInt.arch_unit;
             else
                 obj.num = zeros(1, LongInt.bits_to_uints(1 + uint64(exp)), LongInt.arch_uint_t);
                 obj.num(1) = typecast(frac, LongInt.arch_uint_t);
-                obj = bitshift(obj, -52 + int64(exp));
+                obj.bitshift_inplace(-52 + int64(exp));
             end
-            obj = obj.shrink_to_fit();
+
+            obj.shrink_to_fit();
             obj.sign = sign(num);
         end
 
@@ -184,6 +197,11 @@ classdef LongInt < matlab.mixin.CustomDisplay
         end
 
         function result = digit_mult(A, B)
+            arguments
+                A(1,1) uint64
+                B(1,1) uint64
+            end
+
             A0 = bitshift(bitshift(A, LongInt.arch_w_len / 2), -(LongInt.arch_w_len / 2));
             A1 = bitshift(A, -(LongInt.arch_w_len / 2));
 
@@ -191,11 +209,30 @@ classdef LongInt < matlab.mixin.CustomDisplay
             B1 = bitshift(B, -(LongInt.arch_w_len / 2));
             
             result = LongInt();
+            result.sign = 1;
 
             result.num(1) = B0 * A0;
             result.num(2) = B1 * A1;
             
-            result = add_abs(result, bitshift(add_abs(LongInt(A1 * B0), LongInt(A0 * B1)), (LongInt.arch_w_len / 2)));
+            temp = LongInt();
+            temp.sign = 1;
+            temp.num = [A1 * B0, LongInt.arch_zero];
+
+            x = temp.num(1);
+            y = A0 * B1;
+            temp.num(1) = bitadd(x, y);
+            carry_bit = bitshift(bitor(bitand(x, y), bitand(bitxor(temp.num(1), intmax(LongInt.arch_uint_t)), ...
+                bitor(x, y))), 1 - LongInt.arch_w_len);
+            temp.num(2) = temp.num(2) + carry_bit;
+            
+            temp.bitshift_inplace(LongInt.arch_w_len / 2);
+
+            x = result.num(1);
+            y = temp.num(1);
+            result.num(1) = bitadd(x, y);
+            carry_bit = bitshift(bitor(bitand(x, y), bitand(bitxor(result.num(1), intmax(LongInt.arch_uint_t)), ...
+                bitor(x, y))), 1 - LongInt.arch_w_len);
+            result.num(2) = result.num(2) + temp.num(2) + carry_bit;
         end
     end
 
@@ -206,7 +243,8 @@ classdef LongInt < matlab.mixin.CustomDisplay
             end
             
             if isa(init_num, 'LongInt')
-                obj = init_num;
+                obj.num = init_num.num;
+                obj.sign = init_num.sign;
             elseif isa(init_num, 'double')
                 obj = LongInt.parse_from_double(init_num);
             elseif isinteger(init_num)
@@ -217,58 +255,67 @@ classdef LongInt < matlab.mixin.CustomDisplay
             end
         end
 
+        function result = bitget(obj, ind)
+            arguments
+                obj(1, 1) LongInt
+                ind {mustBeVector(ind), mustBeInteger(ind)}
+            end
+
+            result(length(ind)) = false;
+
+            j = 1;
+            for i = ind
+                whole = ceil(double(i) / double(LongInt.arch_w_len));
+                frac = mod(i - 1, LongInt.arch_w_len);
+
+                m = LongInt.arch_unit;
+                r = obj.num(whole);
+                r = bitand(r, bitshift(m, frac));
+                
+                result(j) = logical(r);
+                j = j + 1;
+            end
+        end
+
         function result = bitshift(obj, k)
             arguments
                 obj(1, 1) LongInt
                 k(1, 1) {mustBeInteger(k)}
             end
-            
-            result = obj;
-            carry_shift = 0;
 
-            if k == 0
+            result = LongInt();
+            result.sign = obj.sign;
+
+            if k == 0 || obj.sign == 0
+                result.num = obj.num;
                 return;
-            end
-
-            whole = floor(abs(double(k) / LongInt.arch_w_len));
-            frac = mod(abs(k), LongInt.arch_w_len);
-
-            if k > 0
-                t = ceil(double(frac - (obj.nwords * LongInt.arch_w_len - abs(obj.msb_pos))) / ...
-                    double(LongInt.arch_w_len));
-                result.num = [zeros(1, whole, LongInt.arch_uint_t), result.num, zeros(1, t, LongInt.arch_uint_t)];
-                
-                if frac ~= 0
-                    for i = 1:result.nwords
-                        r = result.num(i);
-                        result.num(i) = bitor(bitshift(r, frac), carry_shift);
-                        carry_shift = bitshift(r, (frac - LongInt.arch_w_len));
-                    end
-                end
+            elseif k > 0
+                whole = floor(abs(double(k) / double(LongInt.arch_w_len)));
+                result.num = [obj.num zeros(1, whole + 1, LongInt.arch_uint_t)];
             else
-                t = ceil((double((abs(obj.msb_pos) - (obj.nwords - 1) * LongInt.arch_w_len)) - double(frac)) / ...
-                    double(LongInt.arch_w_len));
-
-                temp = result.num((whole + 1):result.nwords);
-                if frac ~= 0
-                    for i = length(temp):-1:1
-                        r = temp(i);
-                        temp(i) = bitor(bitshift(r, -frac), carry_shift);
-                        carry_shift = bitshift(r, LongInt.arch_w_len - frac);
-                    end
-                end
-                result.num = temp(1:end + (t - 1));
+                result.num = obj.num;
             end
+                
+            result.bitshift_inplace(k);
+            result.shrink_to_fit();
         end
 
         function result = uminus(obj)
-            result = obj;
+            arguments
+                obj(1, 1) LongInt
+            end
+
+            result = LongInt(obj);
             result.sign = -result.sign;
         end
 
         function result = abs(obj)
-            result = obj;
-            result.sign = 1;
+            arguments
+                obj(1, 1) LongInt
+            end
+
+            result = LongInt(obj);
+            result.sign = abs(result.sign);
         end
 
         function result = plus(obj, obj2)
@@ -278,16 +325,21 @@ classdef LongInt < matlab.mixin.CustomDisplay
             end
 
             if obj2.sign == 0
-                result = obj;
+                result = LongInt(obj);
             elseif obj.sign == 0
-                result = obj2;
+                result = LongInt(obj2);
             elseif obj.sign == obj2.sign
-                result = add_abs(obj, obj2);
+                result = LongInt(obj);
+                add_abs(result, obj2);
             elseif lt_abs(obj, obj2)
-                result = sub_abs(obj2, obj);
+                result = LongInt(obj2);
+                sub_abs(result, obj);
             else
-                result = sub_abs(obj, obj2);
+                result = LongInt(obj);
+                sub_abs(result, obj2);
             end
+
+            result.shrink_to_fit();
         end
 
         function result = minus(obj, obj2)
@@ -295,21 +347,26 @@ classdef LongInt < matlab.mixin.CustomDisplay
                 obj(1, 1) LongInt
                 obj2(1, 1) LongInt
             end
-           
+            
             if obj2.sign == 0
-                result = obj;
+                result = LongInt(obj);
             elseif obj.sign == 0
-                result = obj2;
-                result.sign = - result.sign;
+                result = LongInt(obj2);
+                result.sign = -(result.sign);
             elseif obj.sign ~= obj2.sign
-                result = add_abs(obj, obj2);
+                result = LongInt(obj);
+                add_abs(result, obj2);
                 result.sign = obj.sign;
             elseif lt_abs(obj, obj2)
-                result = sub_abs(obj2, obj);
-                result.sign = -result.sign;
+                result = LongInt(obj2);
+                sub_abs(result, obj);
+                result.sign = -(result.sign);
             else
-                result = sub_abs(obj, obj2);
+                result = LongInt(obj);
+                sub_abs(result, obj2);
             end
+
+            result.shrink_to_fit();
         end
 
         function result = mtimes(obj, obj2)
@@ -324,39 +381,101 @@ classdef LongInt < matlab.mixin.CustomDisplay
             end
 
             if obj.num == LongInt.arch_unit
-                result = obj2;
+                result = LongInt(obj2);
             elseif obj2.num == LongInt.arch_unit
-                result = obj;
+                result = LongInt(obj);
             else
                 result = mult_karatsuba_abs(obj, obj2);
-                result = result.shrink_to_fit();
+                result.shrink_to_fit();
             end
 
-            if obj.sign == obj2.sign
-                result.sign = 1;
+            result.sign = obj.sign * obj2.sign;
+        end
+
+        function result = mrdivide(obj, obj2)
+            arguments
+                obj(1, 1) LongInt
+                obj2(1, 1) LongInt
+            end
+
+            if obj2.sign == 0
+                throw(MException('LongInt:zeroDivision', 'Cannot divide by zero.'));
+            end
+            
+            if obj.sign == 0
+                result = LongInt();
             else
-                result.sign = -1;
+                [result, ~] = div_abs(obj, obj2);
+            end
+
+            result.sign = obj.sign * obj2.sign;
+        end
+
+        function result = mod(obj, obj2)
+            arguments
+                obj(1, 1) LongInt
+                obj2(1, 1) LongInt
+            end
+
+            if obj2.sign == 0
+                throw(MException('LongInt:zeroDivision', 'Cannot divide by zero.'));
+            end
+
+            if obj.sign == 0
+                result = LongInt();
+            else
+                [~, result] = div_abs(obj, obj2);
             end
         end
 
-        function [result, carry] = mrdivide(obj, obj2)
+        function result = mpower(obj, obj2)
             arguments
                 obj(1, 1) LongInt
-                obj2(1, 1) {mustBeArithmetic(obj2)}
+                obj2(1, 1) LongInt
             end
 
-            result = LongInt(obj.num(1) / obj2.num(1));
-            carry = false;
-        end
+            if obj.sign == 0
+                result = LongInt(LongInt.arch_unit);
+            elseif obj.sign < 0
+                throw(MException('LongInt:negativePower', 'Cannot raise in negative power.'));
+            else
+                w = LongInt.horner_window;
+                a(2^w) = LongInt();
+                
+                a(1) = LongInt(LongInt.arch_unit);
+                for i = 2:2^w
+                    a(i) = mult_karatsuba_abs(a(i - 1), obj);
+                end
+            
+                n = abs(obj2.msb_pos);
+                n = n + mod(n, w);
+                
+                result = a(1);
 
-        function [result, carry] = mpower(obj, obj2)
-            arguments
-                obj(1, 1) LongInt
-                obj2(1, 1) {mustBeArithmetic(obj2)}
+                j = n - w + 1;
+                t = bitget(obj2, j:n);
+                k = sum(t .* (2 .^ (0:w-1)), 'all');
+                result = mult_karatsuba_abs(result, a(k + 1));
+                
+                j = j - w;
+
+                for i = n-w:-w:w
+                    fprintf('%d %%' , (1 - (i / n)));
+                    for p = 1:w
+                        result = mult_karatsuba_abs(result, result);
+                    end
+
+                    t = bitget(obj2, j:i);
+                    k = sum(t .* (2 .^ (0:w-1)), 'all');
+                    
+                    result = mult_karatsuba_abs(result, a(k + 1));
+                    j = j - w;
+                end
             end
 
-            result = LongInt(obj.num(1) / obj2.num(1));
-            carry = false;
+            if obj2.bitget(1)
+                result.sign = abs(result.sign);
+            end
         end
 
         function pos = msb_pos(obj)
@@ -398,8 +517,24 @@ classdef LongInt < matlab.mixin.CustomDisplay
                     result = false;
                 end
             end
+        end
 
+        function result = le(obj, obj2)
+            arguments
+                obj(1, 1) LongInt
+                obj2(1, 1) LongInt
+            end
             
+            result = eq(obj, obj2) || lt(obj, obj2);
+        end
+
+        function result = ne(obj, obj2)
+            arguments
+                obj(1, 1) LongInt
+                obj2(1, 1) LongInt
+            end
+            
+            result = ~eq(obj, obj2);
         end
 
         function result = eq(obj, obj2)
@@ -442,65 +577,110 @@ classdef LongInt < matlab.mixin.CustomDisplay
         function n = nwords(obj)
             n = length(obj.num);
         end
-        
+    
+        function [quotient, residual] = div_abs(obj, obj2)
+            b = abs(obj2);
+            m = abs(obj2.msb_pos);
+            quotient = LongInt();
+            quotient.num = zeros(1, obj.nwords - b.nwords + 1, LongInt.arch_uint_t);
+            residual = abs(obj);
+
+            while b <= residual
+                k = residual.msb_pos() - m;
+                t = bitshift(b, k);
+
+                if lt_abs(residual, t)
+                    t.bitshift_inplace(-1);
+                    k = k - 1;
+                end
+
+                residual.sub_abs(t);
+                residual.shrink_to_fit();
+                quotient.add_abs(bitshift(LongInt(LongInt.arch_unit), k));
+            end
+
+            quotient = quotient.shrink_to_fit();
+        end
+
         function result = mult_karatsuba_abs(obj, obj2)
             if min(obj.nwords, obj2.nwords) > LongInt.karatsuba_threshold
                 [A0, A1, B0, B1] = LongInt.karatsuba_part(obj, obj2);
-                
+
+                n = A0.nwords * LongInt.arch_w_len;
+                result = LongInt();
+                result.sign = 1;
+                result.num = zeros(1, A0.nwords * 4, LongInt.arch_uint_t);
+
                 C1 = mult_karatsuba_abs(A1, B1);
                 C0 = mult_karatsuba_abs(A0, B0);
-                C2 = sub_abs(sub_abs(mult_karatsuba_abs(add_abs(A0, A1), add_abs(B0, B1)), C1), C0);
 
-                result = bitshift(C1, LongInt.arch_w_len * A0.nwords * 2)...
-                    + bitshift(C2, LongInt.arch_w_len * A0.nwords) + C0;
+                A0.add_abs(A1);
+                B0.add_abs(B1);
+
+                C2 = mult_karatsuba_abs(A0, B0);
+                C2.sub_abs(C1);
+                C2.sub_abs(C0);
+
+                result.num(1:C1.nwords) = C1.num;
+                result.bitshift_inplace(n);
+                
+                result.add_abs(C2);
+                result.bitshift_inplace(n);
+
+                result.add_abs(C0);
+
+                result.shrink_to_fit();
             else
                 result = mult_tbl_abs(obj, obj2);
             end
         end
         
         function result = mult_tbl_abs(obj, obj2)
-            result = LongInt.parse_from_array(zeros(1, obj.nwords + obj2.nwords, LongInt.arch_uint_t), 1);
+            result = LongInt();
+            result.num = zeros(1, obj.nwords + obj2.nwords, LongInt.arch_uint_t);
+            result.sign = 1;
+
+            temp = LongInt(result); 
 
             i = 0;
             for a_i = obj.num
                 j = 0;
                 for b_j = obj2.num
-                    result = add_abs(result, bitshift(LongInt.digit_mult(a_i, b_j), LongInt.arch_w_len * (i + j)));
+                    temp.num(1:2) = LongInt.digit_mult(a_i, b_j).num;
+                    temp.bitshift_inplace(LongInt.arch_w_len * (i + j));
+                    
+                    result.add_abs(temp);
+
+                    temp.num((i + j + 1):(i + j + 2)) = LongInt.arch_zero;
                     j = j + 1;
                 end
                 i = i + 1;
             end
+
+            result.shrink_to_fit();
         end
 
-        function result = add_abs(obj, obj2)
+        function obj = add_abs(obj, obj2)
             carry_bit = LongInt.arch_zero;
             
-            if obj2.nwords > obj.nwords
-                result = obj2;
-                n = obj.nwords;
-            else
-                result = obj;
-                n = obj2.nwords;
-            end
+            n = min(obj2.nwords, obj.nwords);
+            obj.num = [obj.num obj2.num(obj.nwords+1:end) LongInt.arch_zero];
 
             for i = 1:n
                 x = obj.num(i);
                 y = obj2.num(i);
-                result.num(i) = bitadd(bitadd(x, y), carry_bit);
-                carry_bit = bitshift(bitor(bitand(x, y), bitand(bitxor(result.num(i), intmax(LongInt.arch_uint_t)), ...
+                obj.num(i) = bitadd(bitadd(x, y), carry_bit);
+                carry_bit = bitshift(bitor(bitand(x, y), bitand(bitxor(obj.num(i), intmax(LongInt.arch_uint_t)), ...
                     bitor(x, y))), 1 - LongInt.arch_w_len);
             end
             i = i + 1;
 
-            while carry_bit ~= 0 && i ~= result.nwords + 1
-                result.num(i) = bitadd(result.num(i), 1);
-                carry_bit = (result.num(i) == LongInt.arch_max_uint);
-                i = i + 1;
-            end
-
             if carry_bit ~= 0
-                result.num = [result.num, LongInt.arch_zero];
-                result.num(result.nwords) = LongInt.arch_unit;
+                while obj.num(i) == LongInt.arch_max_uint
+                    obj.num(i) = LongInt.arch_zero;
+                    i = i + 1;
+                end
+                obj.num(i) = obj.num(i) + LongInt.arch_unit;
             end
         end
 
@@ -516,47 +696,54 @@ classdef LongInt < matlab.mixin.CustomDisplay
             end
             i = i + 1;
 
-            while borrow_bit ~= 0 && i ~= obj.nwords + 1
-                obj.num(i) = bitsubtract(obj.num(i), LongInt.arch_unit);
-                borrow_bit = (obj.num(i) == 0);
-                i = i + 1;
-            end
+            if borrow_bit ~= 0
+                while obj.num(i) == 0
+                    obj.num(i) = LongInt.arch_max_uint;
+                    i = i + 1;
+                end
 
-            obj = shrink_to_fit(obj);
+                obj.num(i) = obj.num(i) - LongInt.arch_unit;
+            end
         end
 
-        function result = bitshift_static(obj, k)
+        function obj = bitshift_inplace(obj, k)
             arguments
                 obj(1, 1) LongInt
                 k(1, 1) {mustBeInteger(k)}
             end
 
-            result = obj;
-            carry_shift = 0;
+            carry_shift = LongInt.arch_zero;
 
             if k == 0
                 return;
             end
 
-            whole = floor(abs(double(k) / arch_w_len));
-            frac = mod(abs(k), arch_w_len);
-            n = result.nwords;
+            whole = floor(abs(double(k) / LongInt.arch_w_len));
+            frac = mod(abs(k), LongInt.arch_w_len);
 
             if k > 0
-                result.num = [zeros(1, whole, arch_uint_t), result.num(1:(n - whole))];
+                if whole ~= 0
+                    obj.num = [zeros(1, whole, LongInt.arch_uint_t), obj.num(1:(obj.nwords - whole))];
+                end
 
-                for i = 1:n
-                    r = result.num(i);
-                    result.num(i) = bitor(bitshift(r, frac), carry_shift);
-                    carry_shift = bitshift(r, (frac - arch_w_len));
+                if frac ~= 0
+                    for i = 1:obj.nwords
+                        r = obj.num(i);
+                        obj.num(i) = bitor(bitshift(r, frac), carry_shift);
+                        carry_shift = bitshift(r, (frac - LongInt.arch_w_len));
+                    end
                 end
             else
-                result.num = [result.num((whole + 1):n), zeros(1, whole, arch_uint_t)];
+                if whole ~= 0
+                    obj.num = [obj.num((whole + 1):end), zeros(1, whole, LongInt.arch_uint_t)];
+                end
 
-                for i = n:-1:1
-                    r = result.num(i);
-                    result.num(i) = bitor(bitshift(r, frac), carry_shift);
-                    carry_shift = bitshift(r, arch_w_len - frac);
+                if frac ~= 0
+                    for i = obj.nwords:-1:1
+                        r = obj.num(i);
+                        obj.num(i) = bitor(bitshift(r, -frac), carry_shift);
+                        carry_shift = bitshift(r, LongInt.arch_w_len - frac);
+                    end
                 end
             end
         end
@@ -569,7 +756,8 @@ classdef LongInt < matlab.mixin.CustomDisplay
                     return;
                 end
             end
-            obj = LongInt(LongInt.arch_zero);
+            obj.num = LongInt.arch_zero;
+            obj.sign = 0;
         end
 
         function r = lt_abs(obj, obj2)
