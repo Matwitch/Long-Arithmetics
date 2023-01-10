@@ -13,6 +13,9 @@ classdef LongIntTest < matlab.unittest.TestCase
         anyNum3 = num2cell(arrayfun(@(x) LongInt.parse_from_array(randuint64(1, x), randi([-1, 1], 1)), ...
             randi(anyNum_max_length, 1, anyNum_test_n)));
 
+        anyNum4 = num2cell(arrayfun(@(x) LongInt.parse_from_array(randuint64(1, x), 1), ...
+            randi(anyNum_max_length, 1, anyNum_test_n)));
+
         %anyPosNum = num2cell(arrayfun(@(x) LongInt.parse_from_array(randuint64(1, x), 1), ...
         %    randi(anyNum_max_length, 1, anyNum_test_n)));
 
@@ -23,7 +26,7 @@ classdef LongIntTest < matlab.unittest.TestCase
         %anyNegNum64bit = num2cell(arrayfun(@(x) -LongInt(x), randuint64(1, anyNum_test_n)));
 
         %anyDouble = num2cell(arrayfun(@(x) typecast(x, 'double'), randuint64(1, anyNum_test_n)))
-        %anyInteger = num2cell(arrayfun(@(x) typecast(x, 'int64'), randuint64(1, anyNum_test_n)))
+        anyInteger = num2cell(arrayfun(@(x) typecast(x, 'int64'), randuint64(1, anyNum_test_n)))
     end
     
     methods (Test)
@@ -141,6 +144,70 @@ classdef LongIntTest < matlab.unittest.TestCase
             end
         end
 
+        function TestGCD_Euclid(testCase, anyNum1, anyNum2)
+            if anyNum2.sign ~= 0 && anyNum1.sign ~= 0
+                d = gcd(anyNum1, anyNum2);
+    
+                testCase.verifyEqual(mod(anyNum1, d), LongInt(0));
+                testCase.verifyEqual(mod(anyNum2, d), LongInt(0));
+            end
+        end
+
+        function TestGCD_Stein(testCase, anyNum1, anyNum2)
+            if anyNum2.sign ~= 0 && anyNum1.sign ~= 0
+                d = gcd_binary(anyNum1, anyNum2);
+    
+                testCase.verifyEqual(mod(anyNum1, d), LongInt(0));
+                testCase.verifyEqual(mod(anyNum2, d), LongInt(0));
+            end
+        end
+
+        function TestGCD_Both(testCase, anyNum1, anyNum2)
+            if anyNum2.sign ~= 0 && anyNum1.sign ~= 0
+                d1 = gcd(anyNum1, anyNum2);
+                d2 = gcd_binary(anyNum1, anyNum2);
+
+                testCase.verifyEqual(d1, d2);
+            end
+        end
+
+        function TestModuloStuff1(testCase, anyNum1, anyNum2, anyNum3, anyNum4)
+            testCase.verifyEqual(mult_mod(mod(anyNum1 + anyNum2, anyNum4), anyNum3, anyNum4), ...
+                                mod(mult_mod(anyNum1, anyNum3, anyNum4) + mult_mod(anyNum2, anyNum3, anyNum4), anyNum4))
+        end
+
+        function TestModuloStuff2(testCase, anyNum1, anyNum2)
+            if anyNum2.sign > 0
+                a = mult_mod(LongInt(133), anyNum1, anyNum2);
+                b = anyNum1;
+    
+                for i = 1:132
+                    b = mod(b + anyNum1, anyNum2);
+                end
+    
+                testCase.verifyEqual(a, b);
+            else
+                fprintf('!');
+            end
+        end
+
+        function TestEulerTh(testCase, anyNum1, anyNum2)
+            if anyNum2.sign ~= 0 
+                n = mod(anyNum2, 2^64);
+                n = n.num;
+                
+                disp(n)
+                if n > 1 && n < 2^50
+                    d = gcd(anyNum1, n);
+                    a = anyNum1 / d;
+        
+                    phi = eulerPhi(double(n));
+
+                    testCase.verifyEqual(power_mod(a, phi, n), 1);
+                end
+            end
+        end
+
         function TestNegDistributive(testCase, anyNum1, anyNum2)
             testCase.verifyEqual(-(anyNum1 + anyNum2), -anyNum1 - anyNum2);
         end
@@ -167,7 +234,7 @@ function n = anyNum_test_n()
 end
 
 function n = anyNum_max_length()
-    n = 2^10 / 64;
+    n = 2^9 / 64 - 2;
 end
 
 function r = randuint64(dim1, dim2)

@@ -250,9 +250,32 @@ classdef LongInt < handle & matlab.mixin.CustomDisplay
             elseif isinteger(init_num)
                 obj.num = cast(abs(init_num), LongInt.arch_uint_t);
                 obj.sign = sign(init_num);
+            elseif isa(init_num, 'logical') 
+                if init_num
+                    obj = LongInt(LongInt.arch_unit);
+                else
+                    obj = LongInt(LongInt.arch_zero);
+                end
             else
                 throw(MException('LongInt:wrongType', 'Cannot construct LongInt from type: %s', class(init_num)));
             end
+        end
+
+        function a = dec2bin(obj)
+            n = length(obj.num) * LongInt.arch_w_len;
+            a(n) = '0';
+            a(:) = '0';
+            
+            for i = 1:length(obj.num)
+                b = dec2bin(obj.num(i));
+                b = b(end:-1:1); 
+
+                j_beg = ((i - 1) * LongInt.arch_w_len) + 1;
+                j_end = j_beg + length(b) - 1;
+                a(j_beg:j_end) = b;
+            end
+            
+            a = a(end:-1:1);
         end
 
         function result = bitget(obj, ind)
@@ -392,6 +415,33 @@ classdef LongInt < handle & matlab.mixin.CustomDisplay
             result.sign = obj.sign * obj2.sign;
         end
 
+        function result = mult_mod(obj, obj2, n, m)
+            arguments
+                obj(1, 1) LongInt
+                obj2(1, 1) LongInt
+                n(1, 1) LongInt
+                m(1, 1) LongInt = LongInt()
+            end
+            
+            if n.sign == 0
+                throw(MException('LongInt:zeroDivision', 'Cannot divide by zero.'));
+            end
+            
+            if n.sign == -1
+                throw(MException('LongInt:negativeModulo', 'The operation is not defined for negative modulo.'));
+            end
+
+            if m.sign == 0
+                result = mod(mult_karatsuba_abs(mod(obj, n), mod(obj2, n)), n);
+            else
+                result = mod_barrett(mult_karatsuba_abs(obj, obj2), n, m);
+
+                if obj.sign * obj2.sign == -1
+                    result = n - result;
+                end
+            end
+        end
+
         function result = mrdivide(obj, obj2)
             arguments
                 obj(1, 1) LongInt
@@ -402,8 +452,9 @@ classdef LongInt < handle & matlab.mixin.CustomDisplay
                 throw(MException('LongInt:zeroDivision', 'Cannot divide by zero.'));
             end
             
-            if obj.sign == 0
+            if obj.sign == 0 || lt_abs(obj, obj2)
                 result = LongInt();
+                return;
             else
                 [result, ~] = div_abs(obj, obj2);
             end
@@ -420,12 +471,226 @@ classdef LongInt < handle & matlab.mixin.CustomDisplay
             if obj2.sign == 0
                 throw(MException('LongInt:zeroDivision', 'Cannot divide by zero.'));
             end
+            
+            if obj2.sign == -1
+                throw(MException('LongInt:negativeModulo', 'The operation is not defined for negative modulo.'));
+            end
 
             if obj.sign == 0
                 result = LongInt();
+                return;
+            elseif lt_abs(obj, obj2)
+                result = LongInt(obj);
+                result.sign = 1;
             else
                 [~, result] = div_abs(obj, obj2);
             end
+
+            if obj.sign == -1
+                result = obj2 - result;
+            end
+        end
+
+        function result = gcd_Euclid(obj, obj2)
+            arguments
+                obj(1, 1) LongInt
+                obj2(1, 1) LongInt
+            end
+
+            if obj.sign == 0 && obj2.sign == 0
+                throw(MException('LongInt:gcdNotDefined', 'There is no gcd for 0 and 0.'));
+            end
+
+            r1 = LongInt(obj);
+            r2 = LongInt(obj2);
+
+            while r2.sign ~= 0
+                temp = r2;
+                r2 = mod(r1, r2);
+                r1 = temp;
+            end
+
+            result = r1;
+        end
+
+        function result = lcm(obj, obj2)
+            arguments
+                obj(1, 1) LongInt
+                obj2(1, 1) LongInt
+            end
+
+            if obj.sign == 0 || obj2.sign == 0
+                result = LongInt();
+                return;
+            end
+            
+            result = div_abs(mult_karatsuba_abs(obj, obj2), gcd(obj, obj2));
+        end
+
+        function result = gcd_binary(obj, obj2)
+            arguments
+                obj(1, 1) LongInt
+                obj2(1, 1) LongInt
+            end
+            
+            if obj.sign == 0 && obj2.sign == 0
+                throw(MException('LongInt:gcdNotDefined', 'There is no gcd for 0 and 0.'));
+            elseif obj.sign == 0
+                result = LongInt(obj2);
+                return;
+            elseif obj2.sign == 0
+                result = LongInt(obj);
+                return;
+            end
+
+            d = LongInt(LongInt.arch_unit);
+                
+            b1 = obj.bitget(1:obj.nwords*LongInt.arch_w_len);
+            b2 = obj2.bitget(1:obj2.nwords*LongInt.arch_w_len);
+            
+            i = 0;
+            while b1(i+1) == false
+                i = i + 1;
+            end
+            l1 = i;
+
+            j = 0;
+            while b2(j+1) == false
+                j = j + 1;
+            end
+            l2 = j;
+
+            a = abs(bitshift(obj, -l1));
+            b = abs(bitshift(obj2, -l2));
+            d = bitshift(d, min(l1, l2));
+
+            while true
+                if lt_abs(a, b)
+                    b.sub_abs(a);
+                    b.shrink_to_fit();
+
+                    if b.sign == 0
+                        result = d * a;
+                        return;
+                    end
+
+                    bt = b.bitget(1:b.nwords*LongInt.arch_w_len);
+            
+                    i = 0;
+                    while bt(i+1) == false
+                        i = i + 1;
+                    end
+                    l_b = i;
+
+                    b = bitshift(b, -l_b);
+                else
+                    a.sub_abs(b);
+                    a.shrink_to_fit();
+
+                    if a.sign == 0
+                        result = d * b;
+                        return;
+                    end
+
+                    at = a.bitget(1:a.nwords*LongInt.arch_w_len);
+            
+                    try
+                    j = 0;
+                    while at(j+1) == false
+                        j = j + 1;
+                    end
+                    l_a = j;
+                    catch ME
+                        disp("hello");
+                    end
+
+                    a = bitshift(a, -l_a);
+                end
+            end
+
+        end
+
+        function result = gcd(obj, obj2)
+            arguments
+                obj(1, 1) LongInt
+                obj2(1, 1) LongInt
+            end
+            
+            if obj.sign == 0 && obj2.sign == 0
+                throw(MException('LongInt:gcdNotDefined', 'There is no gcd for 0 and 0.'));
+            elseif obj.sign == 0
+                result = LongInt(obj2);
+                return;
+            elseif obj2.sign == 0
+                result = LongInt(obj);
+                return;
+            end
+
+            d = LongInt(LongInt.arch_unit);
+                
+            b1 = obj.bitget(1:obj.nwords*LongInt.arch_w_len);
+            b2 = obj2.bitget(1:obj2.nwords*LongInt.arch_w_len);
+            
+            i = 0;
+            while b1(i+1) == false
+                i = i + 1;
+            end
+            l1 = i;
+
+            j = 0;
+            while b2(j+1) == false
+                j = j + 1;
+            end
+            l2 = j;
+
+            a = abs(bitshift(obj, -l1));
+            b = abs(bitshift(obj2, -l2));
+            d = bitshift(d, min(l1, l2));
+
+            while true
+                if lt_abs(a, b)
+                    b.sub_abs(a);
+                    b.shrink_to_fit();
+
+                    if b.sign == 0
+                        result = d * a;
+                        return;
+                    end
+
+                    bt = b.bitget(1:b.nwords*LongInt.arch_w_len);
+            
+                    i = 0;
+                    while bt(i+1) == false
+                        i = i + 1;
+                    end
+                    l_b = i;
+
+                    b = bitshift(b, -l_b);
+                else
+                    a.sub_abs(b);
+                    a.shrink_to_fit();
+
+                    if a.sign == 0
+                        result = d * b;
+                        return;
+                    end
+
+                    at = a.bitget(1:a.nwords*LongInt.arch_w_len);
+            
+                    try
+                    j = 0;
+                    while at(j+1) == false
+                        j = j + 1;
+                    end
+                    l_a = j;
+                    catch ME
+                        disp("hello");
+                    end
+
+                    a = bitshift(a, -l_a);
+                end
+            end
+
         end
 
         function result = mpower(obj, obj2)
@@ -448,7 +713,7 @@ classdef LongInt < handle & matlab.mixin.CustomDisplay
                 end
             
                 n = abs(obj2.msb_pos);
-                n = n + mod(n, w);
+                n = n + (w - mod(n, w));
                 
                 result = a(1);
 
@@ -460,7 +725,7 @@ classdef LongInt < handle & matlab.mixin.CustomDisplay
                 j = j - w;
 
                 for i = n-w:-w:w
-                    fprintf('%d %%' , (1 - (i / n)));
+                    fprintf('%d%% ' , (1 - (i / n)) * 100);
                     for p = 1:w
                         result = mult_karatsuba_abs(result, result);
                     end
@@ -475,6 +740,58 @@ classdef LongInt < handle & matlab.mixin.CustomDisplay
 
             if obj2.bitget(1)
                 result.sign = abs(result.sign);
+            end
+        end
+
+        function result = power_mod(obj, obj2, m)
+            arguments
+                obj(1, 1) LongInt
+                obj2(1, 1) LongInt
+                m(1, 1) LongInt
+            end
+
+            if obj.sign == 0
+                result = LongInt(LongInt.arch_unit);
+            elseif obj.sign < 0
+                throw(MException('LongInt:negativePower', 'Cannot raise in negative power.'));
+            elseif m.sign < 0
+                throw(MException('LongInt:negativeModulo', 'Operation is not defined for negative modulo.'));
+            else
+                m_obj = mod(obj, m);
+                mu = bitshift(LongInt(2), 2 * m.nwords * LongInt.arch_w_len) / m;
+
+                w = LongInt.horner_window;
+                a(2^w) = LongInt();
+                
+                a(1) = LongInt(LongInt.arch_unit);
+                for i = 2:2^w
+                    a(i) = mult_mod(a(i - 1), m_obj, m, mu);
+                end
+            
+                n = abs(obj2.msb_pos);
+                n = n + (w - mod(n, w));
+                
+                result = a(1);
+
+                j = n - w + 1;
+                t = bitget(obj2, j:n);
+                k = sum(t .* (2 .^ (0:w-1)), 'all');
+                result = mult_mod(result, a(k + 1), m, mu);
+                
+                j = j - w;
+
+                for i = n-w:-w:w
+                    fprintf('%d %%' , (1 - (i / n)));
+                    for p = 1:w
+                        result = mult_mod(result, result, m, mu);
+                    end
+
+                    t = bitget(obj2, j:i);
+                    k = sum(t .* (2 .^ (0:w-1)), 'all');
+                    
+                    result = mult_mod(result, a(k + 1), m, mu);
+                    j = j - w;
+                end
             end
         end
 
@@ -578,6 +895,25 @@ classdef LongInt < handle & matlab.mixin.CustomDisplay
             n = length(obj.num);
         end
     
+        function result = mod_barrett(obj, obj2, m)
+            k = (obj2.nwords * LongInt.arch_w_len) / 2;
+
+            q = bitshift(obj, 1 - k);
+            q = mult_karatsuba_abs(q, m);
+            q.bitshift_inplace(-k - 1);
+            q.shrink_to_fit();
+            
+            result = abs(obj) - abs_inplace(mult_karatsuba_abs(q, obj2));
+
+            while lt_abs(obj2, result)
+                result.sub_abs(obj2);
+            end
+
+            if obj.sign == -1
+                result = obj2 - result;
+            end
+        end
+
         function [quotient, residual] = div_abs(obj, obj2)
             b = abs(obj2);
             m = abs(obj2.msb_pos);
@@ -758,6 +1094,10 @@ classdef LongInt < handle & matlab.mixin.CustomDisplay
             end
             obj.num = LongInt.arch_zero;
             obj.sign = 0;
+        end
+
+        function obj = abs_inplace(obj)
+            obj.sign = abs(obj.sign);
         end
 
         function r = lt_abs(obj, obj2)
